@@ -152,6 +152,55 @@ def large_basic_blocks():
 			print("Function: 0x%X (%s) has large basic block score: %f" % (entry[0], entry[1][0], entry[1][1]))
 		print("Highest 5%% covers %i out of %i functions." % (num, len(sorted_metric_dict)))
 
+# Gets overview of most frequently called functions in the database.
+def most_frequently_called_functions():
+	# Create dictionary that will keep track of functions and metrics.
+	metric_dict = {}
+	sum_of_metrics = 0
+	min_metric = 0xFFFFFFFF
+	max_metric = 0
+
+	# Get all segments.
+	seg_ea = idc.get_first_seg()
+	while seg_ea != idc.BADADDR:
+		# Get all functions within this segment.
+		for func_ea in idautils.Functions(seg_ea, idc.get_segm_end(seg_ea)):
+			# Get function name and object pointer.
+			func_name = idc.get_func_name(func_ea)
+
+			# Get number of cross references to this function. We take all cross references because
+			# the caller might have stored the function address in a register and called it from there.
+			# Since the function is executable code, we assume the referring memory location calls to it in some way.
+			metric = len(list(idautils.XrefsTo(func_ea)))
+			metric_dict[func_ea] = (func_name, metric)
+
+			# Keep track of statistical values along the way.
+			sum_of_metrics += metric
+			min_metric = min(min_metric, metric)
+			max_metric = max(max_metric, metric)
+
+		# Get next segment ea.
+		seg_ea = idc.get_next_seg(seg_ea)
+
+	# Sort the metric dictionary by highest metric.
+	sorted_metric_dict = sorted(metric_dict.items(), key=lambda item: item[1][1], reverse=True)
+	if len(sorted_metric_dict) > 0:
+		# Get everything higher than the 95th percentile.
+		threshold = sum_of_metrics * 0.05
+		slider = 0
+		num = 0
+		while slider <= threshold:
+			num += 1
+			slider += sorted_metric_dict[num][1][1]
+
+		# Print the results of the first 80% of largest basic blocks.
+		print("Total number of functions: %i. Lowest metric: %f, highest metric: %f." % (len(sorted_metric_dict), min_metric, max_metric))
+		print("Top 5%% of most frequently called functions.")
+		for i in range(num):
+			entry = sorted_metric_dict[i]
+			print("Function: 0x%X (%s) has %f calling locations." % (entry[0], entry[1][0], entry[1][1]))
+		print("Highest 5%% covers %i out of %i functions." % (num, len(sorted_metric_dict)))
+
 # Define the action_handler_t object that fires the callback function when each action is activated.
 class ActionHandler(idaapi.action_handler_t):
 	def __init__(self, callback):
@@ -171,7 +220,7 @@ def register_actions():
 		{
 			'id': 'heuristics:large_basic_blocks:',
 			'name': 'Large Basic Blocks',
-			'hotkey': 'Ctrl+Alt+F',
+			'hotkey': 'Ctrl+Alt+B',
 			'comment': 'Shows functions with large basic blocks',
 			'callback': large_basic_blocks,
 			'menu_location': 'Edit/Heuristics/Large Basic Blocks'
@@ -179,10 +228,18 @@ def register_actions():
 		{
 			'id': 'heuristics:cyclomatic_complexity',
 			'name': 'Cyclomatic Complexity',
-			'hotkey': 'Ctrl+Alt+E',
+			'hotkey': 'Ctrl+Alt+C',
 			'comment': 'Shows functions with top cyclomatic complexity',
 			'callback': cyclomatic_complexity,
 			'menu_location': 'Edit/Heuristics/Cyclomatic Complexity'
+		},
+		{
+			'id' : 'heuristics:frequently_called_funcs',
+			'name' : 'Frequenly Called Functions',
+			'hotkey' : 'Ctrl+Alt+D',
+			'comment' : 'Shows which functions are most frequently called',
+			'callback' : most_frequently_called_functions,
+			'menu_location' : 'Edit/Heuristics/Frequently Called Functions'
 		}
 	]
 
