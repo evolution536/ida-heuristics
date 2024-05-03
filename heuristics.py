@@ -86,6 +86,59 @@ def func_cyclomatic_complexity(func_ea):
 def func_get_xrefs(func_ea):
 	return len(list(idautils.XrefsTo(func_ea)))
 
+# Gets tree of blocks dominated by a given basic block.
+def get_blocks_dominated_by(block):
+	result = set()
+	worklist = [ block ]
+
+	# Get successing blocks. We perform a depth-first search to get the entire tree.
+	while worklist:
+		next_block = worklist.pop(0)
+		result.add(next_block.start_ea)
+
+		# Get all successing blocks and add them to the worklist.
+		for succ in next_block.succs():
+			# Test whether we have already visited this block. If so, we will not add it to the results.
+			if succ.start_ea in result:
+				continue
+
+			# Not visited yet, so add the successor to the worklist.
+			worklist.append(succ)
+
+	# Return the successors, or the dominated basic blocks.
+	return result
+
+# Computes control flow flattening score for given function.
+def func_control_flow_flattening(func_ea):
+	# Initialize score to zero.
+	score = 0.0
+
+	# Get object reference to function.
+	func_ptr = idaapi.get_func(func_ea)
+
+	# Get flow chart of the function containing all basic blocks.
+	# https://moritzraabe.de/2017/01/15/ida-pro-anti-disassembly-basic-blocks-and-idapython/
+	flowchart = idaapi.FlowChart(func_ptr, flags=idaapi.FC_PREDS | idaapi.FC_NOEXT)
+
+	# Iterate over all blocks in this function and compute the score.
+	for block in flowchart:
+		# Get blocks dominated by the current one.
+		dominated = get_blocks_dominated_by(block)
+
+		# Test for a back edge in the tree of dominated blocks. That means, if there exists an edge
+		# between any of the successing blocks back to the currently examined block, there is a cycle
+		# and, assuming that the current block is the 'controller', the dominated block flows back there.
+		if not any(b.start_ea in dominated and b.start_ea != block.start_ea for b in block.preds()):
+			# None found, so this control flow path has a low probability of being flattened.
+			continue
+
+		# Compute the score with this block.
+		print("DEBUG: len(dominated) = %i, bbs = %i" % (len(dominated), flowchart.size))
+		score = max(score, len(dominated) / flowchart.size)
+
+	# Return the accumulated score.
+	return score
+
 # Iterates over segments and functions, executing a scoring function and tracking the metrics.
 def iterate_functions_and_track_statistics(proc):
 	# Create dictionary that will keep track of functions and metrics.
@@ -125,7 +178,7 @@ def cyclomatic_complexity():
 	# Get 95th percentile of result data.
 	num = get_95th_percentile(results)
 
-	# Print the results of the first 80% of largest basic blocks.
+	# Print the results.
 	print("Total number of functions: %i. Lowest metric: %f, highest metric: %f." % (len(results[0]), results[1], results[2]))
 	print("Top 5%% of functions with highest cyclomatic complexity")
 	for i in range(num):
@@ -141,7 +194,7 @@ def large_basic_blocks():
 	# Get 95th percentile of result data.
 	num = get_95th_percentile(results)
 
-	# Print the results of the first 80% of largest basic blocks.
+	# Print the results.
 	print("Total number of functions: %i. Lowest metric: %f, highest metric: %f." % (len(results[0]), results[1], results[2]))
 	print("Top 5%% of functions with largest basic blocks.")
 	for i in range(num):
@@ -157,7 +210,7 @@ def most_frequently_called_functions():
 	# Get 95th percentile of result data.
 	num = get_95th_percentile(results)
 
-	# Print the results of the first 80% of largest basic blocks.
+	# Print the results.
 	print("Total number of functions: %i. Lowest metric: %f, highest metric: %f." % (len(results[0]), results[1], results[2]))
 	print("Top 5%% of most frequently called functions.")
 	for i in range(num):
@@ -167,7 +220,19 @@ def most_frequently_called_functions():
 
 # Computes control flow flattening score for functions.
 def control_flow_flattening():
-	return
+	# Compute the control flow flattening score over all functions in the database and return a sorted list of results.
+	results = iterate_functions_and_track_statistics(func_control_flow_flattening)
+
+	# Get 95th percentile of result data.
+	num = get_95th_percentile(results)
+
+	# Print the results.
+	print("Total number of functions: %i. Lowest metric: %f, highest metric: %f." % (len(results[0]), results[1], results[2]))
+	print("Top 5%% of highest control flow flattening scores.")
+	for i in range(num):
+		entry = results[0][i]
+		print("Function: 0x%X (%s) has flattening score: %f." % (entry[0], entry[1][0], entry[1][1]))
+	print("Highest 5%% covers %i out of %i functions." % (num, len(results[0])))
 
 # Define the action_handler_t object that fires the callback function when each action is activated.
 class ActionHandler(idaapi.action_handler_t):
