@@ -35,7 +35,67 @@ def count_function_instructions(func_ea):
 
 # The callback executed to compute cyclomatic complexity.
 def cyclomatic_complexity():
-	return
+	# Create dictionary that will keep track of functions and metrics.
+	metric_dict = {}
+	sum_of_metrics = 0
+	min_metric = 0xFFFFFFFF
+	max_metric = 0
+
+	# Get all segments.
+	seg_ea = idc.get_first_seg()
+	while seg_ea != idc.BADADDR:
+		# Get all functions within this segment.
+		for func_ea in idautils.Functions(seg_ea, idc.get_segm_end(seg_ea)):
+			# Get function name and object pointer.
+			func_name = idc.get_func_name(func_ea)
+			func_ptr = idaapi.get_func(func_ea)
+
+			# Get flow chart of the function containing all basic blocks.
+			# https://moritzraabe.de/2017/01/15/ida-pro-anti-disassembly-basic-blocks-and-idapython/
+			flowchart = idaapi.FlowChart(func_ptr, flags=idaapi.FC_PREDS | idaapi.FC_NOEXT)
+
+			# Calculate number of edges inside the function by looking at predecessors and successors.
+			edges = 0
+			for block in flowchart:
+				for succ in block.succs():
+					edges += 1
+				for pred in block.preds():
+					edges += 1
+
+			# Compute the cyclomatic complexity for this function.
+			# We set the minimum value to 1, because in some heavily obfuscated binary files,
+			# functions are not always parsed correctly and a couple of not-connected basic blocks
+			# may reside in the function. In such a case, we would get a negative value that
+			# screws up the statistics. Those are outliers and we will remove them this way.
+			metric = max(1, edges - flowchart.size + 2)
+			metric_dict[func_ea] = (func_name, metric)
+
+			# Keep track of statistical values along the way.
+			sum_of_metrics += metric
+			min_metric = min(min_metric, metric)
+			max_metric = max(max_metric, metric)
+
+		# Get next segment ea.
+		seg_ea = idc.get_next_seg(seg_ea)
+
+	# Sort the metric dictionary by highest metric.
+	sorted_metric_dict = sorted(metric_dict.items(), key=lambda item: item[1][1], reverse=True)
+	if len(sorted_metric_dict) > 0:
+		# Get everything higher than the 95th percentile.
+		threshold = sum_of_metrics * 0.05
+		slider = 0
+		num = 0
+		while slider <= threshold:
+			num += 1
+			slider += sorted_metric_dict[num][1][1]
+
+		# Print the results of the first 80% of largest basic blocks.
+		print("Total number of functions: %i. Lowest metric: %f, highest metric: %f." % (len(sorted_metric_dict), min_metric, max_metric))
+		print("Top 5%% of functions with highest cyclomatic complexity")
+		for i in range(num):
+			entry = sorted_metric_dict[i]
+			print("Function: 0x%X (%s) has cyclomatic complexity: %f" % (entry[0], entry[1][0], entry[1][1]))
+		print("Highest 5%% covers %i out of %i functions." % (num, len(sorted_metric_dict)))
 
 # The callback executed to compute large basic blocks.
 def large_basic_blocks():
@@ -76,8 +136,8 @@ def large_basic_blocks():
 	# Sort the metric dictionary by highest metric.
 	sorted_metric_dict = sorted(metric_dict.items(), key=lambda item: item[1][1], reverse=True)
 	if len(sorted_metric_dict) > 0:
-		# Get first 80 percent by the Pareto principle.
-		threshold = metric * 0.8
+		# Get everything higher than the 95th percentile.
+		threshold = sum_of_metrics * 0.05
 		slider = 0
 		num = 0
 		while slider <= threshold:
@@ -86,10 +146,11 @@ def large_basic_blocks():
 
 		# Print the results of the first 80% of largest basic blocks.
 		print("Total number of functions: %i. Lowest metric: %f, highest metric: %f." % (len(sorted_metric_dict), min_metric, max_metric))
-		print("Top 80% of functions with largest basic blocks.")
+		print("Top 5%% of functions with largest basic blocks.")
 		for i in range(num):
 			entry = sorted_metric_dict[i]
 			print("Function: 0x%X (%s) has large basic block score: %f" % (entry[0], entry[1][0], entry[1][1]))
+		print("Highest 5%% covers %i out of %i functions." % (num, len(sorted_metric_dict)))
 
 # Define the action_handler_t object that fires the callback function when each action is activated.
 class ActionHandler(idaapi.action_handler_t):
