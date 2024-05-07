@@ -133,7 +133,6 @@ def func_control_flow_flattening(func_ea):
 			continue
 
 		# Compute the score with this block.
-		print("DEBUG: len(dominated) = %i, bbs = %i" % (len(dominated), flowchart.size))
 		score = max(score, len(dominated) / flowchart.size)
 
 	# Return the accumulated score.
@@ -205,7 +204,7 @@ def large_basic_blocks():
 # Gets overview of most frequently called functions in the database.
 def most_frequently_called_functions():
 	# Compute the number of cross references to all functions in the database and return a sorted list of results.
-	results = iterate_functions_and_track_statistics(func_large_basic_blocks)
+	results = iterate_functions_and_track_statistics(func_get_xrefs)
 
 	# Get 95th percentile of result data.
 	num = get_95th_percentile(results)
