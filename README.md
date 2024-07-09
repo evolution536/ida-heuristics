@@ -38,7 +38,7 @@ A simple but cool metric is which functions are called from other locations the 
 
 ### Control Flow Flattening
 
-Control Flow Flattening is a common obfuscation method that transforms an algorithm from its original form into an iterative algorithm that uses a state variable to determine which operations are called next. This way, the original code explodes in size and complexity and makes analysts' work harder. Flattened functions might be interesting to look at because the author probably has a reason to obfuscate that specific part of the code.
+Control Flow Flattening is a common obfuscation method that transforms an algorithm from its original form into an iterative algorithm that uses a state variable to determine which operations are called next. This way, the original code explodes in size and complexity and makes analysts' work harder. Flattened functions might be interesting to look at because the author probably has a reason to obfuscate that specific part of the code. This heuristic is quite expensive to compute and might take a minute to complete.
 
 ![Control flow flattening heuristic output](https://github.com/evolution536/ida-heuristics/images/control_flow_flattening.png)
 
