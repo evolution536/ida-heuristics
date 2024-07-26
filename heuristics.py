@@ -1,8 +1,10 @@
 import os
+import re
 import idc
 import idaapi
 import ida_diskio
 import idautils
+import ida_bytes
 
 # Global definitions.
 VERSION = "1.0"
@@ -138,6 +140,70 @@ def func_control_flow_flattening(func_ea):
 	# Return the accumulated score.
 	return score
 
+# Get dictionary of stack members of specified function.
+def get_stack_variables(func_ea):
+	members = {}
+	base = None
+
+	# Get stack frame.
+	frame = idc.get_func_attr(func_ea, idc.FUNCATTR_FRAME)
+
+	# Ignore functions that (don't have a stack frame at all I guess?).
+	if frame == idc.BADADDR:
+		return members, base
+
+	# Iterate frame structure members and save them in the output.
+	for frame_member in idautils.StructMembers(frame):
+		member_offset, member_name, _ = frame_member
+		members[member_name] = member_offset
+		if member_name == ' r':
+			base = member_offset
+	return members, base
+
+# Gets list of cross references to stack variables in function.
+def get_stack_references(func_ea, members, stack_base):
+	refs = {}
+	for func_item in idautils.FuncItems(func_ea):
+		flags = ida_bytes.get_full_flags(func_item)
+		stkvar = 0 if ida_bytes.is_stkvar0(flags) else 1 if ida_bytes.is_stkvar1(flags) else None
+		if stkvar is None:
+			continue
+
+		# Get operand that references the stack location as a string. We will split locations ourselves.
+		opnd = idc.print_operand(func_item, stkvar).replace('[', '').replace(']', '')
+
+		# Split the sub-operands from the memory locator.
+		m = re.split(r'[+*-]', opnd)
+		for x in m:
+			# Test whether one of the fake offsets reside in this instruction.
+			if x in members:
+				# Add it to the dictionary if not already there.
+				if x not in refs:
+					refs[x] = [ func_item ]
+				else:
+					refs[x].append(func_item)
+
+	return refs
+
+# Computes wrong stack frame score for given function.
+def func_wrong_stack_frame(func_ea):
+	# Initialize score to zero.
+	score = 0.0
+
+	# Get stack members first.
+	members, base = get_stack_variables(func_ea)
+
+	# Get cross references to those stack members.
+	total_refs = 0
+	refs = get_stack_references(func_ea, members, base)
+	for v, r in refs.items():
+		if len(r) == 0:
+			continue
+		else: total_refs += len(r)
+
+	# FIXME: see which type of metric would do best here.
+	return len(members) / max(1, total_refs)
+
 # Iterates over segments and functions, executing a scoring function and tracking the metrics.
 def iterate_functions_and_track_statistics(proc):
 	# Create dictionary that will keep track of functions and metrics.
@@ -233,6 +299,22 @@ def control_flow_flattening():
 		print("Function: 0x%X (%s) has flattening score: %f." % (entry[0], entry[1][0], entry[1][1]))
 	print("Highest 5%% covers %i out of %i functions." % (num, len(results[0])))
 
+# Computes wrong stack frame score for functions.
+def wrong_stack_frame():
+	# Compute the wrong stack frame score over all functions in the database and return a sorted list of results.
+	results = iterate_functions_and_track_statistics(func_wrong_stack_frame)
+
+	# Get 95th percentile of result data.
+	num = get_95th_percentile(results)
+
+	# Print the results.
+	print("Total number of functions: %i. Lowest metric: %f, highest metric: %f." % (len(results[0]), results[1], results[2]))
+	print("Top 5%% of highest wrong stack frame scores.")
+	for i in range(num):
+		entry = results[0][i]
+		print("Function: 0x%X (%s) has wrong stack frame score: %f." % (entry[0], entry[1][0], entry[1][1]))
+	print("Highest 5%% covers %i out of %i functions." % (num, len(results[0])))
+
 # Define the action_handler_t object that fires the callback function when each action is activated.
 class ActionHandler(idaapi.action_handler_t):
 	def __init__(self, callback):
@@ -280,6 +362,14 @@ def register_actions():
 			'comment' : 'Identifies functions with a high level of control flow flattening',
 			'callback' : control_flow_flattening,
 			'menu_location' : 'Edit/Heuristics/Control Flow Flattening'
+		},
+		{
+			'id' : 'heuristics:wrong_stack_frame',
+			'name' :' Wrong Stack Frame',
+			'hotkey' : 'Ctrl+Alt+F',
+			'comment' : 'Identifies functions with fake stack variables',
+			'callback' : wrong_stack_frame,
+			'menu_location' : 'Edit/Heuristics/Wrong Stack Frame'
 		}
 	]
 
